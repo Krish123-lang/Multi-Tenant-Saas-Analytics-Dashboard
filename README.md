@@ -1,5 +1,9 @@
 # Multi-Tenant-Saas-Analytics-Dashboard
 
+![ProjectDevelopment](image.png)
+
+<hr/>
+
 ### 1. Create & activate a virtual environment
 ```
 mkdir saas-analytics
