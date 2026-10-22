@@ -18,3 +18,14 @@ py -m venv .venv
 `pip install -r requirements.txt`
 <hr/>
 
+`docker run -d --name saas-redis -p 6379:6379 redis:7`
+
+```
+docker start saas-redis
+docker exec saas-redis redis-cli ping
+
+```
+
+`py -m celery -A config worker --loglevel=INFO --pool=solo`
+
+<hr/>

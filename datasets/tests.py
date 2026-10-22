@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 
 from organizations.models import Membership, Organization
 from .models import Dataset
-
+from .tasks import process_dataset
 
 User = get_user_model()
 
@@ -199,3 +199,46 @@ class DatasetAPITests(APITestCase):
             response.status_code,
             status.HTTP_400_BAD_REQUEST,
         )
+        
+    def test_valid_csv_processing_completes(self):
+        result = process_dataset.apply(
+            args=[self.dataset.pk],
+            throw=True,
+        )
+
+        self.dataset.refresh_from_db()
+
+        self.assertEqual(
+            self.dataset.status,
+            Dataset.Status.COMPLETED,
+        )
+        self.assertEqual(self.dataset.row_count, 1)
+        self.assertEqual(result.result["status"], "completed")
+
+
+    def test_malformed_csv_is_marked_failed(self):
+        malformed = Dataset.objects.create(
+            organization=self.organization,
+            uploaded_by=self.owner,
+            name="Malformed Data",
+            original_filename="malformed.csv",
+            file=SimpleUploadedFile(
+                "malformed.csv",
+                b"date,revenue\n2026-01-01\n",
+                content_type="text/csv",
+            ),
+            file_size=25,
+        )
+
+        process_dataset.apply(
+            args=[malformed.pk],
+            throw=True,
+        )
+
+        malformed.refresh_from_db()
+
+        self.assertEqual(
+            malformed.status,
+            Dataset.Status.FAILED,
+        )
+        self.assertIn("column count", malformed.error_message.lower())
