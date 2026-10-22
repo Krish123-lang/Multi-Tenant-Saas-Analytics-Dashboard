@@ -156,3 +156,4 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Tenant-aware analytics platform API",
     "VERSION": "1.0.0",
 }
+MEDIA_ROOT = BASE_DIR / "private_media"
