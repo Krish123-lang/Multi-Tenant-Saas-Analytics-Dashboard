@@ -42,3 +42,29 @@ class Dataset(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.organization})"
+
+
+class DatasetRecord(models.Model):
+    dataset = models.ForeignKey("datasets.Dataset", on_delete=models.CASCADE, related_name="records",)
+    row_number = models.PositiveIntegerField()
+    data = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ["row_number"]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["dataset", "row_number"],
+                name="unique_dataset_row_number",
+            )
+        ]
+
+        indexes = [
+            models.Index(
+                fields=["dataset", "row_number"],
+                name="dataset_record_row_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"Dataset {self.dataset_id}, row {self.row_number}"
