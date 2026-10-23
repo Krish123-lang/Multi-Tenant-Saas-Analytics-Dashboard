@@ -4,6 +4,8 @@ import os
 from rest_framework import serializers
 from organizations.models import Membership, Organization
 from .models import Dataset
+from analytics.services import (MappingValidationError,normalize_dataset_records,)
+from django.db import transaction
 
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 
@@ -109,3 +111,17 @@ class DatasetSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Amount and date must map to different columns.")
 
         return value
+    
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        mapping_changed = "column_mapping" in validated_data
+
+        if mapping_changed:
+            new_mapping = validated_data["column_mapping"]
+
+            try:
+                normalize_dataset_records(instance, new_mapping)
+            except MappingValidationError as exc:
+                raise serializers.ValidationError({"column_mapping": str(exc)})
+
+        return super().update(instance, validated_data)

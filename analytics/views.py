@@ -14,6 +14,10 @@ from rest_framework import status
 from datasets.models import Dataset, DatasetRecord
 from organizations.models import Membership
 
+from django.db.models import Avg, Count, Sum
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import TruncDate
+
 
 class OrganizationAnalyticsSummaryView(APIView):
     permission_classes = [IsAuthenticated]
@@ -137,3 +141,93 @@ class DatasetAnalyticsView(APIView):
                 for name, amount in categories.items()
             },
         })
+
+class DatasetDatabaseAnalyticsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, dataset_id):
+        dataset = (
+            Dataset.objects.filter(pk=dataset_id,organization__memberships__user=request.user,status=Dataset.Status.COMPLETED,)
+            .distinct()
+            .first()
+        )
+
+        if dataset is None:
+            return Response({"detail": "Dataset not found."},status=status.HTTP_404_NOT_FOUND,)
+
+        mapping = dataset.column_mapping
+
+        if "amount" not in mapping:
+            return Response(
+                {"detail": "Configure an amount column first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        records = dataset.records.all()
+
+        # Reject records that have not been normalized.
+        if records.filter(amount_value__isnull=True).exists():
+            return Response(
+                {
+                    "detail": (
+                        "Some records are not normalized. "
+                        "Save the column mapping again."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        summary = records.aggregate(record_count=Count("id"),total_amount=Sum("amount_value"),average_amount=Avg("amount_value"),)
+
+        response = {
+            "dataset_id": dataset.pk,
+            "record_count": summary["record_count"],
+            "total_amount": str(
+                summary["total_amount"] or Decimal("0")
+            ),
+            "average_amount": str(
+                summary["average_amount"] or Decimal("0")
+            ),
+        }
+
+        if "category" in mapping:
+            category_column = mapping["category"]
+
+            category_totals = (
+                records.annotate(
+                    category_value=KeyTextTransform(
+                        category_column,
+                        "data",
+                    )
+                )
+                .values("category_value")
+                .annotate(total=Sum("amount_value"))
+                .order_by("category_value")
+            )
+
+            response["category_totals"] = [
+                {
+                    "category": item["category_value"] or "Uncategorized",
+                    "total": str(item["total"] or Decimal("0")),
+                }
+                for item in category_totals
+            ]
+
+        if "date" in mapping:
+            daily_totals = (
+                records.filter(transaction_date__isnull=False)
+                .annotate(day=TruncDate("transaction_date"))
+                .values("day")
+                .annotate(total=Sum("amount_value"))
+                .order_by("day")
+            )
+
+            response["daily_totals"] = [
+                {
+                    "date": item["day"].isoformat(),
+                    "total": str(item["total"] or Decimal("0")),
+                }
+                for item in daily_totals
+            ]
+
+        return Response(response)
