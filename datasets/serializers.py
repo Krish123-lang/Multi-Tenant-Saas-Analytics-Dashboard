@@ -6,6 +6,7 @@ from organizations.models import Membership, Organization
 from .models import Dataset
 from analytics.services import (MappingValidationError,normalize_dataset_records,)
 from django.db import transaction
+from pathlib import Path
 
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 
@@ -87,11 +88,20 @@ class DatasetSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         organization_id = validated_data.pop("organization_id")
-        uploaded_file = validated_data["file"]
         organization = Organization.objects.get(pk=organization_id)
-        filename = uploaded_file.name.replace("\\", "/").split("/")[-1]
 
-        return Dataset.objects.create(organization=organization, uploaded_by=self.context["request"].user, original_filename=filename[:255], file_size=uploaded_file.size, **validated_data,)
+        uploaded_file = validated_data["file"]
+
+        original_filename = Path(uploaded_file.name).name
+        file_size = uploaded_file.size
+
+        return Dataset.objects.create(
+            organization=organization,
+            uploaded_by=self.context["request"].user,
+            original_filename=original_filename,
+            file_size=file_size,
+            **validated_data,
+        )
 
     def validate_column_mapping(self, value):
         if not isinstance(value, dict):

@@ -51,7 +51,7 @@ class DatasetRecord(models.Model):
     data = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
     transaction_date = models.DateField(null=True,blank=True,db_index=True,)
-    amount_value = models.DecimalField(max_digits=20,decimal_places=4,null=True,blank=True,db_index=True,)
+    amount_value = models.DecimalField(max_digits=20,decimal_places=6,null=True,blank=True,db_index=True,)
     class Meta:
         ordering = ["row_number"]
 

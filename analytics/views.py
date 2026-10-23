@@ -1,5 +1,5 @@
 from django.db.models import Count, Q, Sum
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -29,6 +29,7 @@ from rest_framework.exceptions import ValidationError
 from .pagination import DatasetRecordPagination
 from .serializers import DatasetRecordSerializer
 
+from django.contrib.auth.decorators import login_required
 
 class OrganizationAnalyticsSummaryView(APIView):
     permission_classes = [IsAuthenticated]
@@ -421,3 +422,19 @@ class DatasetTimeSeriesView(APIView):
                 },
             ],
         })
+
+@login_required
+def dashboard_page(request):
+    organizations = Organization.objects.filter(memberships__user=request.user).distinct().order_by("name")
+
+    datasets = Dataset.objects.filter(
+        organization__memberships__user=request.user,
+        status=Dataset.Status.COMPLETED,
+    ).select_related("organization").distinct().order_by("-created_at")
+
+    return render(request,"analytics/dashboard.html",
+        {
+            "organizations": organizations,
+            "datasets": datasets,
+        },
+    )

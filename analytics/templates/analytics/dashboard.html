@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Dashboard</title>
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+font-family: system-ui, sans-serif;
+color: #202938;
+background: #f4f6fa;
+}
+
+body {
+margin: 0;
+}
+
+header {
+background: #17243a;
+color: white;
+padding: 22px 5%;
+}
+
+main {
+max-width: 1200px;
+margin: 28px auto;
+padding: 0 20px;
+}
+
+.panel, .metric {
+background: white;
+border: 1px solid #e1e6ef;
+border-radius: 12px;
+padding: 20px;
+}
+
+.filters, .metrics {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+gap: 16px;
+margin-bottom: 20px;
+}
+
+.metrics h2 {
+font-size: 1.6rem;
+margin: 8px 0;
+overflow-wrap: anywhere;
+}
+
+label {
+display: block;
+font-size: .9rem;
+margin-bottom: 7px;
+}
+
+input, select, button {
+box-sizing: border-box;
+width: 100%;
+padding: 10px;
+border: 1px solid #cbd3df;
+border-radius: 7px;
+font: inherit;
+}
+
+button {
+cursor: pointer;
+background: #2459c4;
+color: white;
+border: 0;
+}
+
+button:disabled {
+opacity: .5;
+cursor: not-allowed;
+}
+
+.chart-container {
+height: 330px;
+position: relative;
+}
+
+.table-wrap {
+overflow-x: auto;
+}
+
+table {
+border-collapse: collapse;
+width: 100%;
+margin-top: 12px;
+}
+
+th, td {
+text-align: left;
+border-bottom: 1px solid #e1e6ef;
+padding: 12px;
+vertical-align: top;
+}
+
+td {
+overflow-wrap: anywhere;
+}
+
+.pagination {
+display: flex;
+gap: 12px;
+margin-top: 16px;
+}
+
+.pagination button {
+max-width: 130px;
+}
+
+#message {
+margin: 12px 0;
+}
+
+.muted {
+color: #667085;
+}
+</style>
+
+</head>
+
+
+<body>
+<header>
+    <h1>Analytics Dashboard</h1>
+    <p>Explore your organization's imported data.</p>
+</header>
+
+
+<main>
+    <section class="panel filters">
+        <div>
+            <label for="dataset">Dataset</label>
+            <select id="dataset">
+                <option value="">Select a dataset</option>
+                {% for dataset in datasets %}
+                    <option
+                        value="{{ dataset.id }}"
+                        data-organization="{{ dataset.organization.name }}"
+                    >
+                        {{ dataset.name }} — {{ dataset.organization.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+
+<div>
+<label for="start-date">Start date</label>
+<input type="date" id="start-date">
+</div>
+
+<div>
+<label for="end-date">End date</label>
+<input type="date" id="end-date">
+</div>
+
+<div style="align-self: end">
+<button id="refresh">Load analytics</button>
+</div>
+</section>
+
+<p id="message" role="status" aria-live="polite">
+Select a dataset to begin.
+</p>
+
+<section class="metrics">
+<article class="metric">
+<span class="muted">Records</span>
+<h2 id="record-count">—</h2>
+</article>
+
+<article class="metric">
+<span class="muted">Total amount</span>
+<h2 id="total-amount">—</h2>
+</article>
+
+<article class="metric">
+<span class="muted">Average amount</span>
+<h2 id="average-amount">—</h2>
+</article>
+</section>
+
+<section class="panel" style="margin-bottom: 20px">
+<h2>Daily trend</h2>
+<div class="chart-container">
+<canvas id="trend-chart"
+                    role="img"
+                    aria-label="Daily total amount chart"></canvas>
+</div>
+</section>
+
+<section class="panel">
+<h2>Dataset records</h2>
+
+<div>
+<label for="search">Search records</label>
+<input
+                id="search"
+                type="search"
+                placeholder="Search CSV values"
+            >
+</div>
+
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Date</th>
+<th>Amount</th>
+<th>CSV data</th>
+</tr>
+</thead>
+<tbody id="records-body">
+<tr>
+<td colspan="4">Select a dataset to load records.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="pagination">
+<button id="previous" disabled>Previous</button>
+<button id="next" disabled>Next</button>
+</div>
+<p id="page-info" class="muted"></p>
+</section>
+
+</main>
+
+
+<script>
+    const datasetSelect = document.getElementById("dataset");
+    const startInput = document.getElementById("start-date");
+    const endInput = document.getElementById("end-date");
+    const message = document.getElementById("message");
+    const recordsBody = document.getElementById("records-body");
+    const searchInput = document.getElementById("search");
+
+    const today = new Date();
+    const earlier = new Date(today);
+    earlier.setDate(earlier.getDate() - 30);
+
+    function formatDate(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+
+    startInput.value = formatDate(earlier);
+    endInput.value = formatDate(today);
+
+    let chart = null;
+    let nextPageUrl = null;
+    let previousPageUrl = null;
+    let currentPageUrl = null;
+    let searchTimer = null;
+
+    function apiUrl(path) {
+        return `/api/v1/analytics/${path}`;
+    }
+
+    async function getJson(url) {
+        const response = await fetch(url, {
+            method: "GET",
+            credentials: "same-origin",
+            headers: { "Accept": "application/json" }
+        });
+
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            const detail = payload.detail
+                || Object.values(payload).flat().join(" ")
+                || `Request failed (${response.status})`;
+            throw new Error(detail);
+        }
+
+        return payload;
+    }
+
+    function selectedDatasetId() {
+        return datasetSelect.value;
+    }
+
+    function validateDates() {
+        if (!startInput.value || !endInput.value) {
+            throw new Error("Choose both a start date and an end date.");
+        }
+
+        if (startInput.value > endInput.value) {
+            throw new Error("Start date must be on or before end date.");
+        }
+    }
+
+    async function loadSummary(datasetId) {
+        const data = await getJson(
+            apiUrl(`datasets/${datasetId}/database-summary/`)
+        );
+
+        document.getElementById("record-count").textContent =
+            data.record_count ?? "0";
+        document.getElementById("total-amount").textContent =
+            data.total_amount ?? "0";
+        document.getElementById("average-amount").textContent =
+            data.average_amount ?? "0";
+    }
+
+    async function loadChart(datasetId) {
+        validateDates();
+
+        const params = new URLSearchParams({
+            start_date: startInput.value,
+            end_date: endInput.value
+        });
+
+        const data = await getJson(
+            apiUrl(`datasets/${datasetId}/timeseries/?${params}`)
+        );
+
+        const amountSeries = data.datasets.find(
+            item => item.label === "Total amount"
+        );
+
+        const values = (amountSeries?.data || []).map(Number);
+
+        if (chart) {
+            chart.destroy();
+        }
+
+        chart = new Chart(document.getElementById("trend-chart"), {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    label: "Total amount",
+                    data: values,
+                    borderWidth: 2,
+                    tension: 0.2,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: "index"
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+
+    function addCell(row, value) {
+        const cell = document.createElement("td");
+        cell.textContent = value ?? "—";
+        row.appendChild(cell);
+    }
+
+    async function loadRecords(url = null) {
+        const datasetId = selectedDatasetId();
+
+        if (!datasetId) {
+            return;
+        }
+
+        const params = new URLSearchParams({ page_size: "50" });
+
+        if (startInput.value) {
+            params.set("start_date", startInput.value);
+        }
+
+        if (endInput.value) {
+            params.set("end_date", endInput.value);
+        }
+
+        if (searchInput.value.trim()) {
+            params.set("search", searchInput.value.trim());
+        }
+
+        const requestUrl = url || apiUrl(
+            `datasets/${datasetId}/records/?${params}`
+        );
+
+        const data = await getJson(requestUrl);
+
+        recordsBody.replaceChildren();
+
+        for (const record of data.results || []) {
+            const row = document.createElement("tr");
+
+            addCell(row, record.row_number);
+            addCell(row, record.transaction_date);
+            addCell(row, record.amount_value);
+
+            const jsonCell = document.createElement("td");
+            const pre = document.createElement("pre");
+            pre.style.whiteSpace = "pre-wrap";
+            pre.textContent = JSON.stringify(record.data, null, 2);
+            jsonCell.appendChild(pre);
+            row.appendChild(jsonCell);
+
+            recordsBody.appendChild(row);
+        }
+
+        if (!data.results?.length) {
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.colSpan = 4;
+            cell.textContent = "No records found.";
+            row.appendChild(cell);
+            recordsBody.appendChild(row);
+        }
+
+        nextPageUrl = data.next;
+        previousPageUrl = data.previous;
+        currentPageUrl = requestUrl;
+
+        document.getElementById("previous").disabled = !previousPageUrl;
+        document.getElementById("next").disabled = !nextPageUrl;
+
+        document.getElementById("page-info").textContent =
+            `Total matching records: ${data.count ?? 0}`;
+    }
+
+    async function loadDashboard() {
+        const datasetId = selectedDatasetId();
+
+        if (!datasetId) {
+            message.textContent = "Select a dataset to begin.";
+            return;
+        }
+
+        try {
+            validateDates();
+            message.textContent = "Loading analytics…";
+
+            await Promise.all([
+                loadSummary(datasetId),
+                loadChart(datasetId),
+                loadRecords()
+            ]);
+
+            message.textContent = "Analytics loaded.";
+        } catch (error) {
+            message.textContent = error.message;
+        }
+    }
+
+    document.getElementById("refresh").addEventListener(
+        "click",
+        loadDashboard
+    );
+
+    datasetSelect.addEventListener("change", loadDashboard);
+
+    document.getElementById("previous").addEventListener(
+        "click",
+        async () => {
+            try {
+                await loadRecords(previousPageUrl);
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        }
+    );
+
+    document.getElementById("next").addEventListener(
+        "click",
+        async () => {
+            try {
+                await loadRecords(nextPageUrl);
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        }
+    );
+
+    searchInput.addEventListener("input", () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(async () => {
+            try {
+                await loadRecords();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        }, 300);
+    });
+
+    if (datasetSelect.options.length > 1) {
+        datasetSelect.selectedIndex = 1;
+        loadDashboard();
+    }
+</script>
+
+
+</body>
+</html>
