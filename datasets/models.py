@@ -30,6 +30,7 @@ class Dataset(models.Model):
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True,blank=True,)
+    column_mapping = models.JSONField(default=dict,blank=True,)
 
     class Meta:
         ordering = ["-created_at"]

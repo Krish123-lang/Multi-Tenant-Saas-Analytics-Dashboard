@@ -90,3 +90,22 @@ class DatasetSerializer(serializers.ModelSerializer):
         filename = uploaded_file.name.replace("\\", "/").split("/")[-1]
 
         return Dataset.objects.create(organization=organization, uploaded_by=self.context["request"].user, original_filename=filename[:255], file_size=uploaded_file.size, **validated_data,)
+
+    def validate_column_mapping(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Column mapping must be a JSON object.")
+
+        allowed_keys = {"amount", "date", "category"}
+
+        if not set(value).issubset(allowed_keys):
+            raise serializers.ValidationError("Supported mapping keys are amount, date, and category.")
+
+        for key, column_name in value.items():
+            if not isinstance(column_name, str) or not column_name.strip():
+                raise serializers.ValidationError(f"The mapping for '{key}' must name a CSV column.")
+
+        if "amount" in value and "date" in value:
+            if value["amount"] == value["date"]:
+                raise serializers.ValidationError("Amount and date must map to different columns.")
+
+        return value
